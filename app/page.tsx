@@ -1,69 +1,236 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useState, useEffect, useRef } from "react";
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
+
+interface Props {
+  onScanSuccess: (decodedText: string) => void;
+}
+
+function BarcodeScanner({ onScanSuccess }: Props) {
+  const [isScanning, setIsScanning] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const scannerRef = useRef<Html5Qrcode | null>(null);
+  const lastScannedCodeRef = useRef<string | null>(null);
+  const lastScannedTimeRef = useRef<number>(0);
+
+  const elementId = "html5-qrcode-reader";
+
+  const startScanner = async () => {
+    try {
+      setErrorMessage(null);
+      const scanner = new Html5Qrcode(elementId);
+      scannerRef.current = scanner;
+
+      const config = {
+        fps: 10,
+        qrbox: { width: 250, height: 150 },
+        formatsToSupport: [
+          Html5QrcodeSupportedFormats.EAN_13,
+          Html5QrcodeSupportedFormats.EAN_8,
+          Html5QrcodeSupportedFormats.CODE_128,
+        ],
+      };
+
+      await scanner.start(
+        { facingMode: "environment" },
+        config,
+        (decodedText) => {
+          const now = Date.now();
+          if (
+            decodedText === lastScannedCodeRef.current &&
+            now - lastScannedTimeRef.current < 1500
+          ) {
+            return;
+          }
+
+          lastScannedCodeRef.current = decodedText;
+          lastScannedTimeRef.current = now;
+
+          if (typeof window !== "undefined" && window.navigator.vibrate) {
+            window.navigator.vibrate(100);
+          }
+
+          onScanSuccess(decodedText);
+        },
+        () => {}
+      );
+
+      setIsScanning(true);
+    } catch (err: any) {
+      console.error("Camera start failed:", err);
+      setErrorMessage("カメラの起動に失敗しました。カメラ権限を確認してください。");
+    }
+  };
+
+  const stopScanner = async () => {
+    if (scannerRef.current && isScanning) {
+      await scannerRef.current.stop();
+      scannerRef.current.clear();
+      setIsScanning(false);
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (scannerRef.current && scannerRef.current.isScanning) {
+        scannerRef.current.stop().catch(console.error);
+      }
+    };
+  }, []);
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+    <div className="w-full flex flex-col items-center">
+      <div
+        id={elementId}
+        className="w-full max-w-sm rounded-lg overflow-hidden bg-black border border-gray-700 min-h-[220px]"
+      />
+
+      {errorMessage && (
+        <p className="text-red-500 text-sm mt-2">{errorMessage}</p>
+      )}
+
+      <div className="mt-4 flex gap-2">
+        {!isScanning ? (
+          <button
+            onClick={startScanner}
+            className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg shadow active:scale-95 transition"
           >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+            カメラを起動してスキャン
+          </button>
+        ) : (
+          <button
+            onClick={stopScanner}
+            className="px-5 py-2.5 bg-gray-600 hover:bg-gray-700 text-white font-medium rounded-lg shadow active:scale-95 transition"
           >
-            Documentation
-          </a>
-        </div>
-      </main>
+            カメラを停止
+          </button>
+        )}
+      </div>
     </div>
+  );
+}
+
+interface InventoryItem {
+  barcode: string;
+  name: string;
+  actualCount: number;
+}
+
+const PRODUCT_MASTER: Record<string, string> = {
+  "4902370548433": "Nintendo Switch 本体",
+  "4549660853502": "ONE PIECEカードゲーム ブースター",
+  "4988601009999": "スクウェア・エニックス ゲームソフト",
+};
+
+export default function InventoryPage() {
+  const [items, setItems] = useState<Record<string, InventoryItem>>({});
+
+  const handleScanSuccess = (barcode: string) => {
+    setItems((prev) => {
+      const existing = prev[barcode];
+      const name = PRODUCT_MASTER[barcode] || "未登録商品";
+
+      return {
+        ...prev,
+        [barcode]: {
+          barcode,
+          name,
+          actualCount: existing ? existing.actualCount + 1 : 1,
+        },
+      };
+    });
+  };
+
+  const handleManualCountChange = (barcode: string, delta: number) => {
+    setItems((prev) => {
+      const existing = prev[barcode];
+      if (!existing) return prev;
+      const newCount = Math.max(0, existing.actualCount + delta);
+      return {
+        ...prev,
+        [barcode]: { ...existing, actualCount: newCount },
+      };
+    });
+  };
+
+  const handleReset = () => {
+    if (confirm("棚卸しカウントをリセットしますか？")) {
+      setItems({});
+    }
+  };
+
+  const itemList = Object.values(items);
+  const totalCount = itemList.reduce((acc, cur) => acc + cur.actualCount, 0);
+
+  return (
+    <main className="min-h-screen bg-gray-50 p-4 pb-20 max-w-lg mx-auto">
+      <header className="mb-4">
+        <h1 className="text-xl font-bold text-gray-800">スマホ棚卸しスキャナー</h1>
+        <p className="text-xs text-gray-500">
+          カメラでバーコードを枠内に合わせると自動でカウントされます。
+        </p>
+      </header>
+
+      <section className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 mb-6">
+        <BarcodeScanner onScanSuccess={handleScanSuccess} />
+      </section>
+
+      <div className="flex justify-between items-center mb-3">
+        <div className="text-sm font-medium text-gray-700">
+          読み取り合計: <span className="text-lg font-bold text-blue-600">{totalCount}</span> 点（{itemList.length} SKU）
+        </div>
+        {itemList.length > 0 && (
+          <button
+            onClick={handleReset}
+            className="text-xs text-red-500 hover:underline"
+          >
+            クリア
+          </button>
+        )}
+      </div>
+
+      <section className="space-y-2">
+        {itemList.length === 0 ? (
+          <div className="text-center py-8 text-gray-400 text-sm border-2 border-dashed border-gray-200 rounded-lg">
+            スキャンした商品がここに表示されます
+          </div>
+        ) : (
+          itemList.map((item) => (
+            <div
+              key={item.barcode}
+              className="flex items-center justify-between p-3 bg-white border border-gray-200 rounded-lg shadow-sm"
+            >
+              <div className="flex-1 min-w-0 pr-3">
+                <div className="font-semibold text-gray-800 text-sm truncate">
+                  {item.name}
+                </div>
+                <div className="text-xs text-gray-400 font-mono">
+                  {item.barcode}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleManualCountChange(item.barcode, -1)}
+                  className="w-8 h-8 flex items-center justify-center rounded bg-gray-100 active:bg-gray-200 text-gray-700 font-bold"
+                >
+                  -
+                </button>
+                <span className="w-8 text-center font-bold text-base text-gray-900">
+                  {item.actualCount}
+                </span>
+                <button
+                  onClick={() => handleManualCountChange(item.barcode, 1)}
+                  className="w-8 h-8 flex items-center justify-center rounded bg-gray-100 active:bg-gray-200 text-gray-700 font-bold"
+                >
+                  +
+                </button>
+              </div>
+            </div>
+          ))
+        )}
+      </section>
+    </main>
   );
 }
