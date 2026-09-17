@@ -19,41 +19,39 @@ function BarcodeScanner({ onScanSuccess }: Props) {
   const startScanner = async () => {
     try {
       setErrorMessage(null);
+
+      // 既存のインスタンスが残っている場合はクリーンアップ
+      if (scannerRef.current) {
+        try {
+          await scannerRef.current.stop();
+          scannerRef.current.clear();
+        } catch (_) {}
+      }
+
       const scanner = new Html5Qrcode(elementId);
       scannerRef.current = scanner;
 
-      // バーコード認識に最適化した設定
+      // 最も互換性の高い設定
       const config = {
-        fps: 20, // 認識頻度を2倍に向上（より俊敏に反応）
+        fps: 15,
         qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
-          // 画面幅に合わせた横長の読み取り枠を動的に設定
-          const width = Math.floor(viewfinderWidth * 0.85);
-          const height = Math.floor(viewfinderHeight * 0.35);
+          const width = Math.min(Math.floor(viewfinderWidth * 0.85), 300);
+          const height = Math.min(Math.floor(viewfinderHeight * 0.4), 160);
           return { width, height };
         },
         formatsToSupport: [
-          Html5QrcodeSupportedFormats.EAN_13, // 日本の標準JANコード
-          Html5QrcodeSupportedFormats.EAN_8,  // 短縮JANコード
+          Html5QrcodeSupportedFormats.EAN_13,
+          Html5QrcodeSupportedFormats.EAN_8,
           Html5QrcodeSupportedFormats.CODE_128,
-          Html5QrcodeSupportedFormats.UPC_A,
-          Html5QrcodeSupportedFormats.UPC_E,
         ],
-        experimentalFeatures: {
-          useBarCodeDetectorIfSupported: true, // スマホ内蔵の高速ハードウェア検知機能を使用
-        },
       };
 
-      // 背面カメラかつ高画質（フルHD優先）で起動
+      // スマホ背面カメラをシンプルに要求（解像度の制約を外して安全に起動）
       await scanner.start(
-        {
-          facingMode: "environment",
-          width: { min: 640, ideal: 1280, max: 1920 },
-          height: { min: 480, ideal: 720, max: 1080 },
-        },
+        { facingMode: "environment" },
         config,
         (decodedText) => {
           const now = Date.now();
-          // 同じバーコードの重複連続読み取りを防ぐ（1.2秒ディレイ）
           if (
             decodedText === lastScannedCodeRef.current &&
             now - lastScannedTimeRef.current < 1200
@@ -64,9 +62,8 @@ function BarcodeScanner({ onScanSuccess }: Props) {
           lastScannedCodeRef.current = decodedText;
           lastScannedTimeRef.current = now;
 
-          // バイブレーション通知
           if (typeof window !== "undefined" && window.navigator.vibrate) {
-            window.navigator.vibrate(120);
+            window.navigator.vibrate(100);
           }
 
           onScanSuccess(decodedText);
@@ -76,8 +73,10 @@ function BarcodeScanner({ onScanSuccess }: Props) {
 
       setIsScanning(true);
     } catch (err: any) {
-      console.error("Camera start failed:", err);
-      setErrorMessage("カメラの起動に失敗しました。カメラの利用権限を確認してください。");
+      console.error("Camera error:", err);
+      setErrorMessage(
+        "カメラを起動できませんでした。ブラウザのカメラ権限が「許可」になっているか確認してください。"
+      );
     }
   };
 
@@ -105,11 +104,13 @@ function BarcodeScanner({ onScanSuccess }: Props) {
     <div className="w-full flex flex-col items-center">
       <div
         id={elementId}
-        className="w-full max-w-sm rounded-xl overflow-hidden bg-black border border-gray-700 min-h-[260px] shadow-inner"
+        className="w-full max-w-sm rounded-xl overflow-hidden bg-black border border-gray-700 min-h-[240px] relative"
       />
 
       {errorMessage && (
-        <p className="text-red-500 text-sm mt-2">{errorMessage}</p>
+        <div className="p-3 mt-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-xs text-center w-full max-w-sm">
+          {errorMessage}
+        </div>
       )}
 
       <div className="mt-4 flex gap-2">
@@ -190,7 +191,7 @@ export default function InventoryPage() {
       <header className="mb-4 text-center">
         <h1 className="text-xl font-bold text-gray-800">スマホ棚卸しスキャナー</h1>
         <p className="text-xs text-gray-500 mt-1">
-          バーコードを横長枠の中央に合わせると自動で認識されます。
+          バーコードを枠内に合わせると自動でカウントされます。
         </p>
       </header>
 
