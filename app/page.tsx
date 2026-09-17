@@ -10,6 +10,13 @@ interface Props {
 function BarcodeScanner({ onScanSuccess }: Props) {
   const [isScanning, setIsScanning] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [zoomLevel, setZoomLevel] = useState<number>(1);
+  const [zoomSupported, setZoomSupported] = useState<boolean>(false);
+  const [minZoom, setMinZoom] = useState<number>(1);
+  const [maxZoom, setMaxZoom] = useState<number>(3);
+  const [torchOn, setTorchOn] = useState<boolean>(false);
+  const [torchSupported, setTorchSupported] = useState<boolean>(false);
+
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const lastScannedCodeRef = useRef<string | null>(null);
   const lastScannedTimeRef = useRef<number>(0);
@@ -20,7 +27,6 @@ function BarcodeScanner({ onScanSuccess }: Props) {
     try {
       setErrorMessage(null);
 
-      // 既存のインスタンスが残っている場合はクリーンアップ
       if (scannerRef.current) {
         try {
           await scannerRef.current.stop();
@@ -31,11 +37,10 @@ function BarcodeScanner({ onScanSuccess }: Props) {
       const scanner = new Html5Qrcode(elementId);
       scannerRef.current = scanner;
 
-      // 最も互換性の高い設定
       const config = {
-        fps: 15,
+        fps: 20,
         qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
-          const width = Math.min(Math.floor(viewfinderWidth * 0.85), 300);
+          const width = Math.min(Math.floor(viewfinderWidth * 0.88), 320);
           const height = Math.min(Math.floor(viewfinderHeight * 0.4), 160);
           return { width, height };
         },
@@ -43,12 +48,17 @@ function BarcodeScanner({ onScanSuccess }: Props) {
           Html5QrcodeSupportedFormats.EAN_13,
           Html5QrcodeSupportedFormats.EAN_8,
           Html5QrcodeSupportedFormats.CODE_128,
+          Html5QrcodeSupportedFormats.UPC_A,
+          Html5QrcodeSupportedFormats.UPC_E,
         ],
       };
 
-      // スマホ背面カメラをシンプルに要求（解像度の制約を外して安全に起動）
+      // 背面カメラかつフォーカス優先
       await scanner.start(
-        { facingMode: "environment" },
+        {
+          facingMode: "environment",
+          advanced: [{ focusMode: "continuous" } as any],
+        } as any,
         config,
         (decodedText) => {
           const now = Date.now();
@@ -72,11 +82,54 @@ function BarcodeScanner({ onScanSuccess }: Props) {
       );
 
       setIsScanning(true);
+
+      // カメラのハードウェア機能（ズーム/ライト）を検出
+      try {
+        const capabilities = scanner.getRunningTrackCapabilities() as any;
+        if (capabilities?.zoom) {
+          setZoomSupported(true);
+          setMinZoom(capabilities.zoom.min || 1);
+          setMaxZoom(capabilities.zoom.max || 5);
+          setZoomLevel(capabilities.zoom.min || 1);
+        }
+        if (capabilities?.torch) {
+          setTorchSupported(true);
+        }
+      } catch (e) {
+        console.warn("Capabilities not supported", e);
+      }
     } catch (err: any) {
       console.error("Camera error:", err);
       setErrorMessage(
-        "カメラを起動できませんでした。ブラウザのカメラ権限が「許可」になっているか確認してください。"
+        "カメラを起動できませんでした。ブラウザのカメラ権限を確認してください。"
       );
+    }
+  };
+
+  const handleZoomChange = async (newZoom: number) => {
+    setZoomLevel(newZoom);
+    if (scannerRef.current) {
+      try {
+        await scannerRef.current.applyVideoConstraints({
+          advanced: [{ zoom: newZoom } as any],
+        } as any);
+      } catch (e) {
+        console.warn("Failed to apply zoom", e);
+      }
+    }
+  };
+
+  const handleToggleTorch = async () => {
+    if (scannerRef.current && torchSupported) {
+      try {
+        const nextTorch = !torchOn;
+        await scannerRef.current.applyVideoConstraints({
+          advanced: [{ torch: nextTorch } as any],
+        } as any);
+        setTorchOn(nextTorch);
+      } catch (e) {
+        console.warn("Failed to toggle torch", e);
+      }
     }
   };
 
@@ -89,6 +142,7 @@ function BarcodeScanner({ onScanSuccess }: Props) {
         console.error("Failed to stop scanner", e);
       }
       setIsScanning(false);
+      setTorchOn(false);
     }
   };
 
@@ -104,8 +158,49 @@ function BarcodeScanner({ onScanSuccess }: Props) {
     <div className="w-full flex flex-col items-center">
       <div
         id={elementId}
-        className="w-full max-w-sm rounded-xl overflow-hidden bg-black border border-gray-700 min-h-[240px] relative"
+        className="w-full max-w-sm rounded-xl overflow-hidden bg-black border border-gray-700 min-h-[240px] relative shadow-inner"
       />
+
+      {isScanning && (
+        <div className="w-full max-w-sm mt-3 space-y-2 bg-gray-50 p-3 rounded-xl border border-gray-200">
+          {zoomSupported ? (
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-gray-600 font-semibold w-12">ズーム</span>
+              <input
+                type="range"
+                min={minZoom}
+                max={Math.min(maxZoom, 4)}
+                step="0.1"
+                value={zoomLevel}
+                onChange={(e) => handleZoomChange(parseFloat(e.target.value))}
+                className="w-full accent-blue-600 h-2 bg-gray-200 rounded-lg cursor-pointer"
+              />
+              <span className="text-xs font-mono text-gray-700 w-8 text-right">
+                {zoomLevel.toFixed(1)}x
+              </span>
+            </div>
+          ) : (
+            <p className="text-[11px] text-gray-500 text-center">
+              💡 ピントが合わない時は、スマホを15〜20cmほど離して撮影してください
+            </p>
+          )}
+
+          {torchSupported && (
+            <div className="flex justify-end pt-1">
+              <button
+                onClick={handleToggleTorch}
+                className={`text-xs px-3 py-1 rounded-full font-medium transition ${
+                  torchOn
+                    ? "bg-amber-400 text-gray-900 shadow"
+                    : "bg-gray-200 text-gray-700"
+                }`}
+              >
+                {torchOn ? "🔦 ライトON" : "🔦 ライトOFF"}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {errorMessage && (
         <div className="p-3 mt-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-xs text-center w-full max-w-sm">
@@ -191,7 +286,7 @@ export default function InventoryPage() {
       <header className="mb-4 text-center">
         <h1 className="text-xl font-bold text-gray-800">スマホ棚卸しスキャナー</h1>
         <p className="text-xs text-gray-500 mt-1">
-          バーコードを枠内に合わせると自動でカウントされます。
+          バーコードを枠の中央に合わせてください。
         </p>
       </header>
 
