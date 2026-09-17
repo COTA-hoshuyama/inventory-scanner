@@ -10,6 +10,7 @@ interface Props {
 function BarcodeScanner({ onScanSuccess }: Props) {
   const [isScanning, setIsScanning] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [lastScanned, setLastScanned] = useState<string | null>(null);
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const lastScannedCodeRef = useRef<string | null>(null);
   const lastScannedTimeRef = useRef<number>(0);
@@ -20,7 +21,6 @@ function BarcodeScanner({ onScanSuccess }: Props) {
     try {
       setErrorMessage(null);
 
-      // 既存インスタンスの安全な解放
       if (scannerRef.current) {
         try {
           await scannerRef.current.stop();
@@ -28,32 +28,31 @@ function BarcodeScanner({ onScanSuccess }: Props) {
         } catch (_) {}
       }
 
-      const scanner = new Html5Qrcode(elementId);
-      scannerRef.current = scanner;
-
-      // iPhone/Android両方で確実に動く標準スキャン設定
-      const config = {
-        fps: 15,
-        qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
-          // 横長のバーコード用読み取り枠
-          const width = Math.min(Math.floor(viewfinderWidth * 0.85), 320);
-          const height = Math.min(Math.floor(viewfinderHeight * 0.35), 140);
-          return { width, height };
-        },
+      // スマホ内蔵の超高速BarcodeDetectorを最優先で使用
+      const scanner = new Html5Qrcode(elementId, {
+        useBarCodeDetectorIfSupported: true,
         formatsToSupport: [
           Html5QrcodeSupportedFormats.EAN_13,
           Html5QrcodeSupportedFormats.EAN_8,
           Html5QrcodeSupportedFormats.CODE_128,
+          Html5QrcodeSupportedFormats.UPC_A,
+          Html5QrcodeSupportedFormats.UPC_E,
         ],
+        verbose: false,
+      });
+      scannerRef.current = scanner;
+
+      // 画面全体を読み取り対象にして認識率を最大化
+      const config = {
+        fps: 20,
+        // qrboxを指定しないことで、カメラ映像全体からバーコードを高速自動検出
       };
 
-      // iPhoneで絶対にクラッシュしない、最もクリーンな背面カメラ呼び出し
       await scanner.start(
         { facingMode: "environment" },
         config,
         (decodedText) => {
           const now = Date.now();
-          // 重複読み取り防止ディレイ
           if (
             decodedText === lastScannedCodeRef.current &&
             now - lastScannedTimeRef.current < 1500
@@ -63,9 +62,11 @@ function BarcodeScanner({ onScanSuccess }: Props) {
 
           lastScannedCodeRef.current = decodedText;
           lastScannedTimeRef.current = now;
+          setLastScanned(decodedText);
 
+          // バイブレーション（対応機種）
           if (typeof window !== "undefined" && window.navigator.vibrate) {
-            window.navigator.vibrate(100);
+            window.navigator.vibrate(120);
           }
 
           onScanSuccess(decodedText);
@@ -109,9 +110,16 @@ function BarcodeScanner({ onScanSuccess }: Props) {
         className="w-full max-w-sm rounded-xl overflow-hidden bg-black border border-gray-700 min-h-[250px] relative shadow-inner"
       />
 
-      {isScanning && (
-        <p className="text-xs text-gray-500 mt-2 text-center bg-gray-100 py-1 px-3 rounded-full">
-          💡 スマホを近づけすぎず、**20cmほど離して**枠の中央に合わせてください
+      {/* 最後に読み取ったバーコードの即時フィードバック */}
+      {lastScanned && (
+        <div className="mt-2 py-1 px-3 bg-green-50 border border-green-300 text-green-700 text-xs font-mono font-bold rounded-full animate-pulse">
+          読取成功: {lastScanned}
+        </div>
+      )}
+
+      {isScanning && !lastScanned && (
+        <p className="text-xs text-gray-500 mt-2 text-center">
+          バーコードをカメラの画面内に写してください
         </p>
       )}
 
@@ -199,7 +207,7 @@ export default function InventoryPage() {
       <header className="mb-4 text-center">
         <h1 className="text-xl font-bold text-gray-800">スマホ棚卸しスキャナー</h1>
         <p className="text-xs text-gray-500 mt-1">
-          バーコードを枠内に合わせると自動でカウントされます。
+          バーコードをカメラに映すと自動でカウントされます。
         </p>
       </header>
 
