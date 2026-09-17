@@ -22,24 +22,41 @@ function BarcodeScanner({ onScanSuccess }: Props) {
       const scanner = new Html5Qrcode(elementId);
       scannerRef.current = scanner;
 
+      // バーコード認識に最適化した設定
       const config = {
-        fps: 10,
-        qrbox: { width: 250, height: 150 },
+        fps: 20, // 認識頻度を2倍に向上（より俊敏に反応）
+        qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
+          // 画面幅に合わせた横長の読み取り枠を動的に設定
+          const width = Math.floor(viewfinderWidth * 0.85);
+          const height = Math.floor(viewfinderHeight * 0.35);
+          return { width, height };
+        },
         formatsToSupport: [
-          Html5QrcodeSupportedFormats.EAN_13,
-          Html5QrcodeSupportedFormats.EAN_8,
+          Html5QrcodeSupportedFormats.EAN_13, // 日本の標準JANコード
+          Html5QrcodeSupportedFormats.EAN_8,  // 短縮JANコード
           Html5QrcodeSupportedFormats.CODE_128,
+          Html5QrcodeSupportedFormats.UPC_A,
+          Html5QrcodeSupportedFormats.UPC_E,
         ],
+        experimentalFeatures: {
+          useBarCodeDetectorIfSupported: true, // スマホ内蔵の高速ハードウェア検知機能を使用
+        },
       };
 
+      // 背面カメラかつ高画質（フルHD優先）で起動
       await scanner.start(
-        { facingMode: "environment" },
+        {
+          facingMode: "environment",
+          width: { min: 640, ideal: 1280, max: 1920 },
+          height: { min: 480, ideal: 720, max: 1080 },
+        },
         config,
         (decodedText) => {
           const now = Date.now();
+          // 同じバーコードの重複連続読み取りを防ぐ（1.2秒ディレイ）
           if (
             decodedText === lastScannedCodeRef.current &&
-            now - lastScannedTimeRef.current < 1500
+            now - lastScannedTimeRef.current < 1200
           ) {
             return;
           }
@@ -47,8 +64,9 @@ function BarcodeScanner({ onScanSuccess }: Props) {
           lastScannedCodeRef.current = decodedText;
           lastScannedTimeRef.current = now;
 
+          // バイブレーション通知
           if (typeof window !== "undefined" && window.navigator.vibrate) {
-            window.navigator.vibrate(100);
+            window.navigator.vibrate(120);
           }
 
           onScanSuccess(decodedText);
@@ -59,14 +77,18 @@ function BarcodeScanner({ onScanSuccess }: Props) {
       setIsScanning(true);
     } catch (err: any) {
       console.error("Camera start failed:", err);
-      setErrorMessage("カメラの起動に失敗しました。カメラ権限を確認してください。");
+      setErrorMessage("カメラの起動に失敗しました。カメラの利用権限を確認してください。");
     }
   };
 
   const stopScanner = async () => {
     if (scannerRef.current && isScanning) {
-      await scannerRef.current.stop();
-      scannerRef.current.clear();
+      try {
+        await scannerRef.current.stop();
+        scannerRef.current.clear();
+      } catch (e) {
+        console.error("Failed to stop scanner", e);
+      }
       setIsScanning(false);
     }
   };
@@ -83,7 +105,7 @@ function BarcodeScanner({ onScanSuccess }: Props) {
     <div className="w-full flex flex-col items-center">
       <div
         id={elementId}
-        className="w-full max-w-sm rounded-lg overflow-hidden bg-black border border-gray-700 min-h-[220px]"
+        className="w-full max-w-sm rounded-xl overflow-hidden bg-black border border-gray-700 min-h-[260px] shadow-inner"
       />
 
       {errorMessage && (
@@ -94,14 +116,14 @@ function BarcodeScanner({ onScanSuccess }: Props) {
         {!isScanning ? (
           <button
             onClick={startScanner}
-            className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg shadow active:scale-95 transition"
+            className="px-6 py-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-semibold rounded-xl shadow-md active:scale-95 transition"
           >
             カメラを起動してスキャン
           </button>
         ) : (
           <button
             onClick={stopScanner}
-            className="px-5 py-2.5 bg-gray-600 hover:bg-gray-700 text-white font-medium rounded-lg shadow active:scale-95 transition"
+            className="px-6 py-3 bg-gray-600 hover:bg-gray-700 active:bg-gray-800 text-white font-semibold rounded-xl shadow-md active:scale-95 transition"
           >
             カメラを停止
           </button>
@@ -165,25 +187,25 @@ export default function InventoryPage() {
 
   return (
     <main className="min-h-screen bg-gray-50 p-4 pb-20 max-w-lg mx-auto">
-      <header className="mb-4">
+      <header className="mb-4 text-center">
         <h1 className="text-xl font-bold text-gray-800">スマホ棚卸しスキャナー</h1>
-        <p className="text-xs text-gray-500">
-          カメラでバーコードを枠内に合わせると自動でカウントされます。
+        <p className="text-xs text-gray-500 mt-1">
+          バーコードを横長枠の中央に合わせると自動で認識されます。
         </p>
       </header>
 
-      <section className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 mb-6">
+      <section className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 mb-5">
         <BarcodeScanner onScanSuccess={handleScanSuccess} />
       </section>
 
-      <div className="flex justify-between items-center mb-3">
+      <div className="flex justify-between items-center mb-3 px-1">
         <div className="text-sm font-medium text-gray-700">
-          読み取り合計: <span className="text-lg font-bold text-blue-600">{totalCount}</span> 点（{itemList.length} SKU）
+          合計数量: <span className="text-xl font-bold text-blue-600">{totalCount}</span> 点（{itemList.length} SKU）
         </div>
         {itemList.length > 0 && (
           <button
             onClick={handleReset}
-            className="text-xs text-red-500 hover:underline"
+            className="text-xs text-red-500 hover:underline px-2 py-1"
           >
             クリア
           </button>
@@ -192,20 +214,20 @@ export default function InventoryPage() {
 
       <section className="space-y-2">
         {itemList.length === 0 ? (
-          <div className="text-center py-8 text-gray-400 text-sm border-2 border-dashed border-gray-200 rounded-lg">
+          <div className="text-center py-10 text-gray-400 text-sm border-2 border-dashed border-gray-200 rounded-xl">
             スキャンした商品がここに表示されます
           </div>
         ) : (
           itemList.map((item) => (
             <div
               key={item.barcode}
-              className="flex items-center justify-between p-3 bg-white border border-gray-200 rounded-lg shadow-sm"
+              className="flex items-center justify-between p-3.5 bg-white border border-gray-200 rounded-xl shadow-sm"
             >
               <div className="flex-1 min-w-0 pr-3">
                 <div className="font-semibold text-gray-800 text-sm truncate">
                   {item.name}
                 </div>
-                <div className="text-xs text-gray-400 font-mono">
+                <div className="text-xs text-gray-400 font-mono mt-0.5">
                   {item.barcode}
                 </div>
               </div>
@@ -213,7 +235,7 @@ export default function InventoryPage() {
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => handleManualCountChange(item.barcode, -1)}
-                  className="w-8 h-8 flex items-center justify-center rounded bg-gray-100 active:bg-gray-200 text-gray-700 font-bold"
+                  className="w-9 h-9 flex items-center justify-center rounded-lg bg-gray-100 active:bg-gray-200 text-gray-700 font-bold text-lg transition"
                 >
                   -
                 </button>
@@ -222,7 +244,7 @@ export default function InventoryPage() {
                 </span>
                 <button
                   onClick={() => handleManualCountChange(item.barcode, 1)}
-                  className="w-8 h-8 flex items-center justify-center rounded bg-gray-100 active:bg-gray-200 text-gray-700 font-bold"
+                  className="w-9 h-9 flex items-center justify-center rounded-lg bg-gray-100 active:bg-gray-200 text-gray-700 font-bold text-lg transition"
                 >
                   +
                 </button>
